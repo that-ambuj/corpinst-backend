@@ -11,6 +11,7 @@ const port = PORT || 3000;
 const app = express();
 
 app.use(cors());
+app.use(express.json());
 if (NODE_ENV === "dev") {
     app.use(morgan("dev"));
 }
