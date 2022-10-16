@@ -12,8 +12,6 @@ import path from "path";
 
 import { NODE_ENV } from "./utils/config";
 import { existsSync, readFileSync } from "fs";
-import mime from "mime";
-import { nextTick } from "process";
 // TODO add an error handler middleware
 
 // add automatic error handling
