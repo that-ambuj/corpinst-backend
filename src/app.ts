@@ -4,9 +4,16 @@ import cors from "cors";
 import morgan from "morgan";
 import formidable from "formidable";
 
+// @ts-ignore
+import gTTS from "gtts";
+
 import { randomUUID } from "crypto";
+import path from "path";
 
 import { NODE_ENV } from "./utils/config";
+import { existsSync, readFileSync } from "fs";
+import mime from "mime";
+import { nextTick } from "process";
 // TODO add an error handler middleware
 
 // add automatic error handling
@@ -31,7 +38,11 @@ app.use(express.static("assets"));
 app.post("/create_new_storage", (req, res) => {
     // TODO check for existing cookies in response
     // TODO add database integration
-    res.cookie("token", randomUUID());
+    res.cookie("token", randomUUID(), {
+        sameSite: true,
+        httpOnly: true,
+        maxAge: 900000,
+    });
     res.status(200);
     return res.json({
         status: "OK",
@@ -53,6 +64,16 @@ app.post("/upload_file", async (req, res, next) => {
         uploadDir: "assets/public/upload/",
         keepExtensions: true,
         multiples: false,
+        filename: (name, ext) => randomUUID() + ext,
+        filter: ({ mimetype }) => {
+            return (
+                mimetype?.includes("image") ||
+                mimetype?.includes("audio") ||
+                mimetype?.includes("text") ||
+                mimetype?.includes("video") ||
+                false
+            );
+        },
     });
 
     form.parse(req, (err, fields, { my_file }) => {
@@ -61,7 +82,7 @@ app.post("/upload_file", async (req, res, next) => {
             return;
         }
         if (my_file === undefined) {
-            res.status(401);
+            res.status(400);
             res.json({
                 error: "No file provided",
             });
@@ -74,6 +95,52 @@ app.post("/upload_file", async (req, res, next) => {
         res.json({
             status: "OK",
             file_path: `public/upload/${newFileName}`,
+        });
+        return;
+    });
+});
+
+app.post("/text_file_to_audio", (req, res, next) => {
+    if (req.body.file_path === undefined) {
+        res.status(400);
+        res.json({
+            error: "File path to convert not provided",
+        });
+        return;
+    }
+
+    const file_path = path.join("assets", req.body.file_path?.toString());
+
+    if (!existsSync(file_path)) {
+        res.status(400);
+        res.json({
+            error: "File does not exist",
+        });
+    }
+
+    const text_rgx = /\.txt$/;
+    if (!text_rgx.test(req.body.file_path)) {
+        res.status(400);
+        res.json({
+            error: "Provided file is not a text file",
+        });
+    }
+
+    const audio_file_name = randomUUID() + ".mp3";
+
+    // no types exist for gtts library
+    // @ts-ignore
+    const gtts = new gTTS(readFileSync(file_path).toString(), "en");
+    // @ts-ignore
+    gtts.save(`assets/public/upload/${audio_file_name}`, (err, result) => {
+        if (err) {
+            console.error(err);
+        }
+        res.status(202);
+        res.json({
+            status: "OK",
+            message: "Text to Speech Converted",
+            audio_file_path: `public/upload/${audio_file_name}`,
         });
         return;
     });
