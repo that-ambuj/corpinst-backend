@@ -34,7 +34,6 @@ app.use(cookieParser());
 app.use(express.static("assets"));
 
 app.post("/create_new_storage", (req, res) => {
-    // TODO check for existing cookies in response
     // TODO add database integration
     res.cookie("token", randomUUID(), {
         sameSite: true,
