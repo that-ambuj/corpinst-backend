@@ -9,6 +9,7 @@ import gTTS from "gtts";
 
 import { randomUUID } from "crypto";
 import path from "path";
+import { spawn, exec } from "child_process";
 
 import { NODE_ENV } from "./utils/config";
 import { existsSync, readFileSync } from "fs";
@@ -158,6 +159,7 @@ app.get("/download_file", async (req, res) => {
         });
         return;
     }
+
     const file_path = path.join("assets", req.query.file_path.toString());
 
     if (!existsSync(file_path)) {
@@ -171,6 +173,53 @@ app.get("/download_file", async (req, res) => {
     res.status(200);
     res.download(file_path);
     return;
+});
+
+app.post("/merge_video_and_audio", async (req, res) => {
+    if (
+        req.body.audio_file_path === undefined ||
+        req.body.video_file_path === undefined
+    ) {
+        res.status(400);
+        res.json({
+            error: "Video and/or audio file path is not provided",
+        });
+        return;
+    }
+
+    const audio_file_path = path.join("assets", req.body.audio_file_path);
+    const video_file_path = path.join("assets", req.body.video_file_path);
+
+    if (!existsSync(audio_file_path) || !existsSync(video_file_path)) {
+        res.status(400);
+        res.json({
+            error: "Video and/or audio file does not exist",
+        });
+        return;
+    }
+
+    const new_file_path = path.join("public", "upload", randomUUID() + ".mp4");
+
+    exec(
+        `ffmpeg -i ${video_file_path} -i ${audio_file_path} -c:v copy -map 0:v:0 -map 1:a:0 assets/${new_file_path}`,
+        (err, stdout, stderr) => {
+            if (err) {
+                res.status(500);
+                res.json({
+                    error: "error while merging the videos and audios",
+                });
+                return;
+            }
+
+            res.status(200);
+            res.json({
+                status: "OK",
+                message: "Video and Audio merged successfully",
+                file_path: new_file_path,
+            });
+            return;
+        }
+    );
 });
 
 export default app;
