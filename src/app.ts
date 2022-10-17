@@ -113,6 +113,7 @@ app.post("/text_file_to_audio", (req, res, next) => {
         res.json({
             error: "File does not exist",
         });
+        return;
     }
 
     const text_rgx = /\.txt$/;
@@ -121,6 +122,7 @@ app.post("/text_file_to_audio", (req, res, next) => {
         res.json({
             error: "Provided file is not a text file",
         });
+        return;
     }
 
     const audio_file_name = randomUUID() + ".mp3";
@@ -131,7 +133,12 @@ app.post("/text_file_to_audio", (req, res, next) => {
     // @ts-ignore
     gtts.save(`assets/public/upload/${audio_file_name}`, (err, result) => {
         if (err) {
+            res.status(500);
+            res.json({
+                error: "An error occurred while converting to file to audio",
+            });
             console.error(err);
+            return;
         }
         res.status(202);
         res.json({
@@ -141,6 +148,29 @@ app.post("/text_file_to_audio", (req, res, next) => {
         });
         return;
     });
+});
+
+app.get("/download_file", async (req, res) => {
+    if (req.query.file_path === undefined) {
+        res.status(400);
+        res.json({
+            error: "file_path not provided",
+        });
+        return;
+    }
+    const file_path = path.join("assets", req.query.file_path.toString());
+
+    if (!existsSync(file_path)) {
+        res.status(400);
+        res.json({
+            error: "File does not exist",
+        });
+        return;
+    }
+
+    res.status(200);
+    res.download(file_path);
+    return;
 });
 
 export default app;
