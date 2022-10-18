@@ -67,7 +67,7 @@ app.post("/create_new_storage", async (req, res) => {
 
 app.use(storageParser);
 
-app.post("/upload_file", async (req, res, next) => {
+app.post("/upload_file", async (req, res) => {
     // @ts-ignore
     const storage = req.storage;
 
@@ -111,7 +111,7 @@ app.post("/upload_file", async (req, res, next) => {
     });
 });
 
-app.post("/text_file_to_audio", (req, res, next) => {
+app.post("/text_file_to_audio", (req, res) => {
     // @ts-ignore
     const storage = req.storage;
 
@@ -228,6 +228,16 @@ app.post("/merge_video_and_audio", async (req, res) => {
             });
         }
     );
+});
+
+app.get("/my_uploaded_files", async (req, res) => {
+    // @ts-ignore
+    const storage = req.storage;
+
+    return res.status(200).json({
+        status: "OK",
+        data: storage.files,
+    });
 });
 
 export default app;
