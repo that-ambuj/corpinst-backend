@@ -1,22 +1,35 @@
 import express from "express";
+import type { Response, Request, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import morgan from "morgan";
 import formidable from "formidable";
+import mongoose from "mongoose";
 
 // @ts-ignore
 import gTTS from "gtts";
 
 import { randomUUID } from "crypto";
 import path from "path";
-import { spawn, exec } from "child_process";
-
-import { NODE_ENV } from "./utils/config";
+import { exec } from "child_process";
 import { existsSync, readFileSync } from "fs";
-// TODO add an error handler middleware
+
+import Storage from "./models/Storage";
+import { storageParser } from "./utils/middlewares";
+
+import { NODE_ENV, DATABASE_URL } from "./utils/config";
 
 // add automatic error handling
 require("express-async-errors");
+
+mongoose
+    .connect(DATABASE_URL || "")
+    .then(() => {
+        console.log("connected to mongodb");
+    })
+    .catch((error) => {
+        console.log("error connecting to mongodb :", error.message);
+    });
 
 const app = express();
 
@@ -34,9 +47,13 @@ app.use(cookieParser());
 // serve the assets directory(routes to /public/*)
 app.use(express.static("assets"));
 
-app.post("/create_new_storage", (req, res) => {
-    // TODO add database integration
-    res.cookie("token", randomUUID(), {
+app.post("/create_new_storage", async (req, res) => {
+    const new_token = randomUUID();
+
+    const new_storage = new Storage({ token: new_token, files: [] });
+    await new_storage.save();
+
+    res.cookie("token", new_token, {
         sameSite: true,
         httpOnly: true,
         maxAge: 900000,
@@ -48,15 +65,11 @@ app.post("/create_new_storage", (req, res) => {
     });
 });
 
+app.use(storageParser);
+
 app.post("/upload_file", async (req, res, next) => {
-    // TODO add database integration
-    const token = req.cookies.token;
-    if (token === undefined) {
-        res.status(400);
-        return res.json({
-            error: "Please create a storage before uploading file",
-        });
-    }
+    // @ts-ignore
+    const storage = req.storage;
 
     const form = formidable({
         uploadDir: "assets/public/upload/",
@@ -74,21 +87,21 @@ app.post("/upload_file", async (req, res, next) => {
         },
     });
 
-    form.parse(req, (err, fields, { my_file }) => {
+    form.parse(req, async (err, fields, { my_file }) => {
         if (err) {
-            next(err);
-            return;
+            throw new Error(err);
         }
         if (my_file === undefined) {
-            res.status(400);
-            res.json({
+            return res.status(400).json({
                 error: "No file provided",
             });
-            return;
         }
-        // todo add new filename to database and link with user token
         // @ts-ignore wrong type declarations causing issues accessing valid keys
         const newFileName = my_file.newFilename;
+
+        storage.files.push(newFileName);
+        await storage.save();
+
         res.status(202);
         res.json({
             status: "OK",
@@ -99,31 +112,28 @@ app.post("/upload_file", async (req, res, next) => {
 });
 
 app.post("/text_file_to_audio", (req, res, next) => {
+    // @ts-ignore
+    const storage = req.storage;
+
     if (req.body.file_path === undefined) {
-        res.status(400);
-        res.json({
+        return res.status(400).json({
             error: "File path to convert not provided",
         });
-        return;
     }
 
     const file_path = path.join("assets", req.body.file_path?.toString());
 
     if (!existsSync(file_path)) {
-        res.status(400);
-        res.json({
+        return res.status(400).json({
             error: "File does not exist",
         });
-        return;
     }
 
     const text_rgx = /\.txt$/;
     if (!text_rgx.test(req.body.file_path)) {
-        res.status(400);
-        res.json({
+        return res.status(400).json({
             error: "Provided file is not a text file",
         });
-        return;
     }
 
     const audio_file_name = randomUUID() + ".mp3";
@@ -132,39 +142,37 @@ app.post("/text_file_to_audio", (req, res, next) => {
     // @ts-ignore
     const gtts = new gTTS(readFileSync(file_path).toString(), "en");
     // @ts-ignore
-    gtts.save(`assets/public/upload/${audio_file_name}`, (err, result) => {
+    gtts.save(`assets/public/upload/${audio_file_name}`, async (err: Error) => {
         if (err) {
-            res.status(500);
-            res.json({
+            res.status(500).json({
                 error: "An error occurred while converting to file to audio",
             });
             console.error(err);
             return;
         }
-        res.status(202);
-        res.json({
+
+        storage.files.push(audio_file_name);
+        await storage.save();
+
+        return res.status(202).json({
             status: "OK",
             message: "Text to Speech Converted",
             audio_file_path: `public/upload/${audio_file_name}`,
         });
-        return;
     });
 });
 
 app.get("/download_file", async (req, res) => {
     if (req.query.file_path === undefined) {
-        res.status(400);
-        res.json({
+        return res.status(400).json({
             error: "file_path not provided",
         });
-        return;
     }
 
     const file_path = path.join("assets", req.query.file_path.toString());
 
     if (!existsSync(file_path)) {
-        res.status(400);
-        res.json({
+        res.status(400).json({
             error: "File does not exist",
         });
         return;
@@ -176,12 +184,14 @@ app.get("/download_file", async (req, res) => {
 });
 
 app.post("/merge_video_and_audio", async (req, res) => {
+    // @ts-ignore
+    const storage = req.storage;
+
     if (
         req.body.audio_file_path === undefined ||
         req.body.video_file_path === undefined
     ) {
-        res.status(400);
-        res.json({
+        res.status(400).json({
             error: "Video and/or audio file path is not provided",
         });
         return;
@@ -191,8 +201,7 @@ app.post("/merge_video_and_audio", async (req, res) => {
     const video_file_path = path.join("assets", req.body.video_file_path);
 
     if (!existsSync(audio_file_path) || !existsSync(video_file_path)) {
-        res.status(400);
-        res.json({
+        res.status(400).json({
             error: "Video and/or audio file does not exist",
         });
         return;
@@ -204,20 +213,19 @@ app.post("/merge_video_and_audio", async (req, res) => {
         `ffmpeg -i ${video_file_path} -i ${audio_file_path} -c:v copy -map 0:v:0 -map 1:a:0 assets/${new_file_path}`,
         (err, stdout, stderr) => {
             if (err) {
-                res.status(500);
-                res.json({
-                    error: "error while merging the videos and audios",
-                });
-                return;
+                throw new Error("error while merging the video and audio");
             }
 
-            res.status(200);
-            res.json({
+            console.log("stdout:", stdout);
+            console.error("stderr:", stderr);
+
+            storage.files.push(new_file_path);
+
+            return res.status(200).json({
                 status: "OK",
                 message: "Video and Audio merged successfully",
                 file_path: new_file_path,
             });
-            return;
         }
     );
 });
