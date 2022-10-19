@@ -6,12 +6,13 @@
     "author": "that-ambuj <ambujs89@github.com>",
     "license": "MIT",
     "scripts": {
-        "build": "tsc",
+        "build": "yarn clean && tsc",
         "dev": "NODE_ENV=dev ts-node-dev src/index.ts",
         "clean": "rimraf dist",
         "test": "NODE_ENV=test jest",
         "test:watch": "NODE_ENV=test jest --watchAll",
-        "run:prod": "NODE_ENV=production node dist/index.js"
+        "run:prod": "NODE_ENV=production node dist/index.js",
+        "build:run": "yarn build && yarn run:prod"
     },
     "dependencies": {
         "cookie-parser": "^1.4.6",
