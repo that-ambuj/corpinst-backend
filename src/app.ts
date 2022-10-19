@@ -11,7 +11,7 @@ import gTTS from "gtts";
 
 import { randomUUID } from "crypto";
 import path from "path";
-import { exec } from "child_process";
+import { exec, execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 
 import Storage from "./models/Storage";
@@ -41,6 +41,10 @@ if (NODE_ENV === "dev") {
     app.use(morgan("dev"));
 }
 
+if (NODE_ENV === "production") {
+    app.use(morgan("tiny"));
+}
+
 // enable cookie parser
 app.use(cookieParser());
 
@@ -56,7 +60,7 @@ app.post("/create_new_storage", async (req, res) => {
     res.cookie("token", new_token, {
         sameSite: true,
         httpOnly: true,
-        maxAge: 900000,
+        maxAge: 9000000,
     });
     res.status(200);
     return res.json({
@@ -191,20 +195,18 @@ app.post("/merge_video_and_audio", async (req, res) => {
         req.body.audio_file_path === undefined ||
         req.body.video_file_path === undefined
     ) {
-        res.status(400).json({
+        return res.status(400).json({
             error: "Video and/or audio file path is not provided",
         });
-        return;
     }
 
     const audio_file_path = path.join("assets", req.body.audio_file_path);
     const video_file_path = path.join("assets", req.body.video_file_path);
 
     if (!existsSync(audio_file_path) || !existsSync(video_file_path)) {
-        res.status(400).json({
+        return res.status(400).json({
             error: "Video and/or audio file does not exist",
         });
-        return;
     }
 
     const new_file_path = path.join("public", "upload", randomUUID() + ".mp4");
@@ -213,7 +215,9 @@ app.post("/merge_video_and_audio", async (req, res) => {
         `ffmpeg -i ${video_file_path} -i ${audio_file_path} -c:v copy -map 0:v:0 -map 1:a:0 assets/${new_file_path}`,
         (err, stdout, stderr) => {
             if (err) {
-                throw new Error("error while merging the video and audio");
+                return res.status(500).json({
+                    error: "error while merging the video and audio",
+                });
             }
 
             console.log("stdout:", stdout);
@@ -224,6 +228,128 @@ app.post("/merge_video_and_audio", async (req, res) => {
             return res.status(200).json({
                 status: "OK",
                 message: "Video and Audio merged successfully",
+                file_path: new_file_path,
+            });
+        }
+    );
+});
+
+app.post("/merge_image_and_audio", async (req, res) => {
+    // @ts-ignore
+    const storage = req.storage;
+
+    if (
+        req.body.audio_file_path === undefined ||
+        req.body.image_file_path === undefined
+    ) {
+        return res.status(400).json({
+            error: "image and/or audio file path is not provided",
+        });
+    }
+
+    const audio_file_path = path.join("assets", req.body.audio_file_path);
+    const image_file_path = path.join("assets", req.body.image_file_path);
+
+    if (!existsSync(audio_file_path) || !existsSync(image_file_path)) {
+        return res.status(400).json({
+            error: "Video and/or audio file does not exist",
+        });
+    }
+
+    const new_file_path = path.join("public", "upload", randomUUID() + ".mp4");
+
+    exec(
+        `ffmpeg -i ${image_file_path} -i ${audio_file_path} -map 0:v:0 -map 1:a:0 assets/${new_file_path}`,
+        (err, stdout, stderr) => {
+            if (err) {
+                return res.status(500).json({
+                    error: "An error occured while convert image and audio into a video.",
+                });
+            }
+
+            console.log("stdout:", stdout);
+            console.error("stderr:", stderr);
+
+            storage.files.push(new_file_path);
+
+            return res.status(200).json({
+                status: "OK",
+                message: "Image and Audio merged successfully",
+                file_path: new_file_path,
+            });
+        }
+    );
+});
+
+app.post("/merge_videos", async (req, res) => {
+    // @ts-ignore
+    const storage = req.storage;
+
+    // clean up after error and before starting another request
+    if (existsSync("inter0.ts")) {
+        execSync(`rm inter*`);
+    }
+
+    if (req.body.video_file_path_list === undefined) {
+        return res.status(400).json({
+            error: "List of video files to merge was not provided",
+        });
+    }
+    const video_list: string[] = req.body.video_file_path_list.map(
+        (video: string) => path.join("assets", video)
+    );
+
+    video_list.forEach((video) => {
+        if (!existsSync(video)) {
+            return res.status(400).json({
+                error: "One of the files in list was not found",
+            });
+        }
+    });
+
+    const new_file_path = path.join("public", "upload", randomUUID() + ".mp4");
+
+    const intermediate_files: string[] = [];
+
+    for (let i = 0; i < video_list.length; i++) {
+        const inter_video = `inter${i}.ts`;
+        const inter = execSync(
+            `ffmpeg -i ${video_list[i]} -c copy ${inter_video}`
+        );
+        intermediate_files.push(inter_video);
+    }
+
+    console.log(intermediate_files);
+
+    console.log(
+        `ffmpeg -i "concat:${intermediate_files.join(
+            "|"
+        )}" -c copy assets/${new_file_path}`
+    );
+
+    exec(
+        `ffmpeg -i "concat:${intermediate_files.join(
+            "|"
+        )}" -c copy assets/${new_file_path}`,
+        (err, stdout, stderr) => {
+            if (err) {
+                return res.status(500).json({
+                    error: "error while merging the videos.",
+                });
+            }
+
+            console.log("stdout:", stdout);
+            console.error("stderr:", stderr);
+
+            storage.files.push(new_file_path);
+
+            if (existsSync("inter0.ts")) {
+                execSync(`rm inter*`);
+            }
+
+            return res.status(200).json({
+                status: "OK",
+                message: "Videos merged successfully",
                 file_path: new_file_path,
             });
         }
